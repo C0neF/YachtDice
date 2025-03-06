@@ -1,4 +1,3 @@
-import React from 'react'
 import DiceContainer from './components/Container'
 
 function App() {
