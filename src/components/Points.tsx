@@ -7,6 +7,7 @@ interface PointsProps {
   diceRefs: React.MutableRefObject<(RapierRigidBody | null)[]>;
   resetCount: number;
   isRolling: boolean;
+  updateTrigger?: number; // 添加触发器属性
 }
 
 // Helper function to determine dice value from orientation
@@ -48,58 +49,41 @@ function getDiceValueFromRotation(rotation: {x: number, y: number, z: number, w:
   return upFaceValue;
 }
 
-export default function Points({ diceRefs, resetCount, isRolling }: PointsProps) {
+export default function Points({ diceRefs, resetCount, isRolling, updateTrigger = 0 }: PointsProps) {
   const [totalPoints, setTotalPoints] = useState(0);
   const [diceValues, setDiceValues] = useState<number[]>([]);
-  // 添加引用来跟踪上次处理的resetCount
-  const lastProcessedResetRef = useRef(0);
-  // 添加计时器引用
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Calculate dice points after they've settled
+  
+  // 当骰子被重置时重置点数
   useEffect(() => {
-    // 只有当resetCount改变且大于之前处理的值时才处理
-    if (resetCount > 0 && resetCount !== lastProcessedResetRef.current) {
-      // 更新为当前处理的resetCount
-      lastProcessedResetRef.current = resetCount;
-      
-      // 清除现有计时器
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-      
-      // Initially reset points when rolling starts
+    if (resetCount > 0) {
       setTotalPoints(0);
       setDiceValues([]);
-      
-      // Wait for dice to settle before calculating points
-      timerRef.current = setTimeout(() => {
-        const values: number[] = [];
-        let sum = 0;
-        
-        // Check each dice's orientation
-        diceRefs.current.forEach(dice => {
-          if (dice) {
-            const rotation = dice.rotation();
-            const value = getDiceValueFromRotation(rotation);
-            values.push(value);
-            sum += value;
-          }
-        });
-        
-        setDiceValues(values);
-        setTotalPoints(sum);
-        timerRef.current = null;
-      }, 3000); // 3 seconds after roll initiated
     }
-    
-    // 组件卸载时清理
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, [resetCount, diceRefs]);
+  }, [resetCount]);
+  
+  // 当所有骰子都稳定后（通过updateTrigger触发），计算点数
+  useEffect(() => {
+    if (updateTrigger > 0 && !isRolling) {
+      // 计算点数
+      const values: number[] = [];
+      let sum = 0;
+      
+      // 检查每个骰子的方向
+      diceRefs.current.forEach(dice => {
+        if (dice) {
+          const rotation = dice.rotation();
+          const value = getDiceValueFromRotation(rotation);
+          values.push(value);
+          sum += value;
+        }
+      });
+      
+      // 这里直接使用setState，因为已经确保骰子完全锁定，
+      // 不会引起任何物理计算干扰
+      setDiceValues(values);
+      setTotalPoints(sum);
+    }
+  }, [updateTrigger, diceRefs, isRolling]);
 
   // Render the points display
   return (

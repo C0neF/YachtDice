@@ -16,13 +16,20 @@ interface PhysicsDiceProps {
   resetCount?: number;
   index?: number;
   startDelay?: number;
+  onStable?: (index: number) => void;  // 添加稳定回调函数
 }
 
 // 物理骰子组件
 const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) => {
   // 使用正确的类型定义引用
   const diceRef = useRef<RapierRigidBody>(null)
-  const { position = [0, 0, 0], resetCount = 0, index = 0, startDelay = 0 } = props
+  const { position = [0, 0, 0], resetCount = 0, index = 0, startDelay = 0, onStable } = props
+  // 使用useRef而不是useState来避免重新渲染
+  const isResettingRef = useRef(false);
+  // 保存当前应用的阻尼值
+  const currentDampingRef = useRef(0.5);
+  // 跟踪骰子是否已经锁定
+  const isLockedRef = useRef(false);
 
   // 向父组件公开rigidBody实例
   useImperativeHandle(ref, () => diceRef.current as RapierRigidBody);
@@ -38,6 +45,97 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 跟踪上次处理的resetCount，防止重复处理
   const lastResetCountRef = useRef(0);
+  // 添加一个稳定性计时器引用
+  const stabilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 添加一个渐进式增加阻尼的计时器引用
+  const gradualDampingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 添加检查稳定状态的计时器引用
+  const stabilityCheckRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 添加位置历史数组，用于检测稳定性
+  const positionHistoryRef = useRef<Array<{pos: THREE.Vector3, time: number}>>([]);
+
+  // 锁定骰子物理状态的函数
+  const lockDicePhysics = () => {
+    if (diceRef.current && !isLockedRef.current) {
+      // 完全锁定骰子的物理属性 - 使用setBodyType需要额外的wake参数
+      diceRef.current.setBodyType(2, true); // 2 = 固定/锁定 (Fixed), true = wake
+      
+      // 清除所有速度和力
+      diceRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      diceRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      
+      // 标记为已锁定
+      isLockedRef.current = true;
+      
+      // 如果提供了稳定回调函数，调用它
+      if (onStable) {
+        onStable(index);
+      }
+    }
+  };
+
+  // 检查骰子是否稳定
+  const checkStability = () => {
+    if (!diceRef.current || isLockedRef.current) return;
+    
+    const currentPos = diceRef.current.translation();
+    const currentTime = Date.now();
+    
+    // 创建一个Three.js向量以方便计算
+    const posVector = new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z);
+    
+    // 添加到历史记录
+    positionHistoryRef.current.push({ pos: posVector, time: currentTime });
+    
+    // 只保留最近的10个历史记录
+    if (positionHistoryRef.current.length > 10) {
+      positionHistoryRef.current.shift();
+    }
+    
+    // 如果我们有足够的历史记录，检查稳定性
+    if (positionHistoryRef.current.length >= 5) {
+      let isStable = true;
+      
+      // 检查最近5个位置的变化
+      for (let i = 1; i < 5; i++) {
+        const prev = positionHistoryRef.current[positionHistoryRef.current.length - i - 1];
+        const curr = positionHistoryRef.current[positionHistoryRef.current.length - i];
+        
+        // 计算位移量
+        const distance = prev.pos.distanceTo(curr.pos);
+        
+        // 如果移动太多，则不稳定
+        if (distance > 0.0001) {
+          isStable = false;
+          break;
+        }
+      }
+      
+      // 检查线性和角速度
+      if (isStable) {
+        const linVel = diceRef.current.linvel();
+        const angVel = diceRef.current.angvel();
+        
+        const linVelMagnitude = Math.sqrt(
+          Math.pow(linVel.x, 2) + Math.pow(linVel.y, 2) + Math.pow(linVel.z, 2)
+        );
+        
+        const angVelMagnitude = Math.sqrt(
+          Math.pow(angVel.x, 2) + Math.pow(angVel.y, 2) + Math.pow(angVel.z, 2)
+        );
+        
+        // 如果速度太大，则不稳定
+        if (linVelMagnitude > 0.005 || angVelMagnitude > 0.005) {
+          isStable = false;
+        }
+      }
+      
+      // 如果稳定，锁定骰子
+      if (isStable) {
+        lockDicePhysics();
+      }
+    }
+  };
 
   // 当resetCount变化时重置骰子 - 所有骰子同时落下
   useEffect(() => {
@@ -49,11 +147,37 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       // 清除任何现有计时器
       if (timerRef.current) {
         clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
+      if (stabilityTimerRef.current) {
+        clearTimeout(stabilityTimerRef.current);
+        stabilityTimerRef.current = null;
+      }
+      if (gradualDampingRef.current) {
+        clearInterval(gradualDampingRef.current);
+        gradualDampingRef.current = null;
+      }
+      if (stabilityCheckRef.current) {
+        clearInterval(stabilityCheckRef.current);
+        stabilityCheckRef.current = null;
+      }
+
+      // 重置历史记录
+      positionHistoryRef.current = [];
+      
+      // 设置重置状态
+      isResettingRef.current = true;
+      // 重置阻尼值
+      currentDampingRef.current = 0.5;
+      // 重置锁定状态
+      isLockedRef.current = false;
       
       // 所有骰子使用相同的延迟，实现同时落下
       timerRef.current = setTimeout(() => {
         if (diceRef.current) {
+          // 重新激活物理 - 使用setBodyType需要额外的wake参数
+          diceRef.current.setBodyType(0, true); // 0 = 动态 (Dynamic), true = wake
+          
           // 获取从props传入的位置 - 骰子将排成一行
           const [posX, initialY, posZ] = position;
           
@@ -80,6 +204,10 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
           diceRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
           diceRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
+          // 设置初始阻尼值
+          diceRef.current.setLinearDamping(currentDampingRef.current);
+          diceRef.current.setAngularDamping(currentDampingRef.current);
+
           // 应用轻微的初始力和扭矩 - 给每个骰子一点随机性
           const torque = {
             x: (Math.random() - 0.5) * 0.1,
@@ -87,7 +215,46 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
             z: (Math.random() - 0.5) * 0.1
           };
           diceRef.current.applyTorqueImpulse(torque, true);
+          
+          // 1.5秒后开始渐进增加阻尼，更自然地稳定骰子
+          stabilityTimerRef.current = setTimeout(() => {
+            if (diceRef.current) {
+              // 设置一个逐渐增加阻尼的间隔
+              gradualDampingRef.current = setInterval(() => {
+                if (diceRef.current && currentDampingRef.current < 20.0 && !isLockedRef.current) {
+                  // 逐渐增加阻尼，每次增加一点点
+                  currentDampingRef.current += 0.5;
+                  diceRef.current.setLinearDamping(currentDampingRef.current);
+                  diceRef.current.setAngularDamping(currentDampingRef.current);
+                  
+                  // 达到最大阻尼后停止
+                  if (currentDampingRef.current >= 20.0) {
+                    if (gradualDampingRef.current) {
+                      clearInterval(gradualDampingRef.current);
+                      gradualDampingRef.current = null;
+                    }
+                    // 完全稳定后更新状态
+                    isResettingRef.current = false;
+                  }
+                }
+              }, 100); // 每100毫秒逐渐增加阻尼
+              
+              // 开始稳定性检查
+              stabilityCheckRef.current = setInterval(() => {
+                checkStability();
+              }, 100); // 每100毫秒检查一次稳定性
+            }
+            stabilityTimerRef.current = null;
+          }, 1500);
+          
+          // 如果5秒后仍未锁定，强制锁定
+          setTimeout(() => {
+            if (!isLockedRef.current && diceRef.current) {
+              lockDicePhysics();
+            }
+          }, 4000);
         }
+        timerRef.current = null;
       }, startDelay); // 所有骰子使用相同的延迟
     }
     
@@ -96,8 +263,17 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
+      if (stabilityTimerRef.current) {
+        clearTimeout(stabilityTimerRef.current);
+      }
+      if (gradualDampingRef.current) {
+        clearInterval(gradualDampingRef.current);
+      }
+      if (stabilityCheckRef.current) {
+        clearInterval(stabilityCheckRef.current);
+      }
     };
-  }, [resetCount, index, startDelay, position]);
+  }, [resetCount, index, startDelay, position, onStable]);
 
   // ...剩余代码保持不变...
   
@@ -129,11 +305,12 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       position={position} 
       restitution={0.6}
       friction={0.2}
-      linearDamping={0.5}
-      angularDamping={0.5}
+      linearDamping={currentDampingRef.current}  // 使用当前阻尼引用值
+      angularDamping={currentDampingRef.current}  // 使用当前阻尼引用值
       rotation={randomRotation as [number, number, number]} 
       colliders="cuboid"
       mass={0.1}
+      type={isLockedRef.current ? "fixed" : "dynamic"}  // 基于锁定状态动态设置类型
     >
       {/* 主骰子 */}
       <mesh castShadow receiveShadow>

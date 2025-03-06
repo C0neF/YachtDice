@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
 import type { RapierRigidBody } from '@react-three/rapier'
@@ -24,6 +24,9 @@ const resetButtonStyle = {
   transition: 'all 0.2s ease'
 };
 
+// 创建5个骰子的数组
+const diceCount = 5;
+
 // 主场景容器组件
 export default function DiceContainer() {
   // 骰子重置计数器
@@ -34,6 +37,30 @@ export default function DiceContainer() {
   const diceRefs = useRef<(RapierRigidBody | null)[]>([]);
   // 添加一个计时器引用来防止重复触发
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 添加一个引用来跟踪已稳定的骰子
+  const stableDiceCountRef = useRef(0);
+  // 添加一个引用来跟踪是否已经计算过点数
+  const hasCalculatedPointsRef = useRef(false);
+  // 添加一个更新点数的触发器状态
+  const [updatePointsTrigger, setUpdatePointsTrigger] = useState(0);
+
+  // 处理骰子稳定的回调
+  const handleDiceStable = useCallback((index: number) => {
+    // 增加稳定骰子的计数
+    stableDiceCountRef.current++;
+    
+    // 检查是否所有骰子都已稳定
+    if (stableDiceCountRef.current === diceCount && !hasCalculatedPointsRef.current) {
+      // 所有骰子都已稳定，可以计算点数
+      hasCalculatedPointsRef.current = true;
+      
+      // 等待一小段时间确保所有骰子都完全锁定
+      setTimeout(() => {
+        // 触发点数计算
+        setUpdatePointsTrigger(prev => prev + 1);
+      }, 100);
+    }
+  }, []);
 
   // 重置函数 - 使用useCallback以确保函数引用稳定
   const handleReset = useCallback(() => {
@@ -44,19 +71,21 @@ export default function DiceContainer() {
         resetTimerRef.current = null;
       }
 
+      // 重置稳定骰子计数和点数计算标记
+      stableDiceCountRef.current = 0;
+      hasCalculatedPointsRef.current = false;
+
       setIsRolling(true);
       setResetCount(prevCount => prevCount + 1);
       
-      // 3秒后重新允许投掷
+      // 增加等待时间确保整个过程完成
       resetTimerRef.current = setTimeout(() => {
         setIsRolling(false);
         resetTimerRef.current = null;
-      }, 3000);
+      }, 4500);
     }
   }, [isRolling]);
 
-  // 创建5个骰子的数组
-  const diceCount = 5;
   const diceArray = Array(diceCount).fill(null);
   
   // 计算骰子的起始位置 - 在容器上方水平排列
@@ -100,7 +129,12 @@ export default function DiceContainer() {
       </button>
 
       {/* 点数统计组件 */}
-      <Points diceRefs={diceRefs} resetCount={resetCount} isRolling={isRolling} />
+      <Points 
+        diceRefs={diceRefs} 
+        resetCount={resetCount} 
+        isRolling={isRolling} 
+        updateTrigger={updatePointsTrigger}
+      />
 
       <Canvas 
         shadows 
@@ -126,6 +160,7 @@ export default function DiceContainer() {
               resetCount={resetCount}
               index={index}
               startDelay={100} // 所有骰子使用相同的延迟，实现同时落下
+              onStable={handleDiceStable} // 添加稳定回调
               ref={(el: RapierRigidBody | null) => {
                 // 确保数组有足够空间
                 while (diceRefs.current.length <= index) {
