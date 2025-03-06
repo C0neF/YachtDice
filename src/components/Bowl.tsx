@@ -1,4 +1,3 @@
-import React from 'react';
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import * as THREE from 'three';
 
