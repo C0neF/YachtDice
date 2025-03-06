@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Physics } from '@react-three/rapier'
 import type { RapierRigidBody } from '@react-three/rapier'
@@ -45,7 +45,7 @@ export default function DiceContainer() {
   const [updatePointsTrigger, setUpdatePointsTrigger] = useState(0);
 
   // 处理骰子稳定的回调
-  const handleDiceStable = useCallback((index: number) => {
+  const handleDiceStable = useCallback(() => {
     // 增加稳定骰子的计数
     stableDiceCountRef.current++;
     
