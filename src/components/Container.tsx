@@ -4,6 +4,7 @@ import { Physics } from '@react-three/rapier'
 import type { RapierRigidBody } from '@react-three/rapier'
 import PhysicsDice from './Dice'
 import Bowl from './Bowl'
+import Points from '../utils/Points'
 
 // 固定位置的重置按钮样式
 const resetButtonStyle = {
@@ -40,22 +41,13 @@ export default function DiceContainer() {
   const stableDiceCountRef = useRef(0);
   // 添加一个引用来跟踪是否已经计算过点数
   const hasCalculatedPointsRef = useRef(false);
-  // 保存所有骰子的最终值
-  const [diceValues, setDiceValues] = useState<number[]>([]);
-  // 保存总点数
-  const [totalPoints, setTotalPoints] = useState(0);
+  // 添加一个更新点数的触发器状态
+  const [updatePointsTrigger, setUpdatePointsTrigger] = useState(0);
 
   // 处理骰子稳定的回调
-  const handleDiceStable = useCallback((index: number, value: number) => {
+  const handleDiceStable = useCallback(() => {
     // 增加稳定骰子的计数
     stableDiceCountRef.current++;
-    
-    // 更新骰子值数组
-    setDiceValues(prev => {
-      const newValues = [...prev];
-      newValues[index] = value;
-      return newValues;
-    });
     
     // 检查是否所有骰子都已稳定
     if (stableDiceCountRef.current === diceCount && !hasCalculatedPointsRef.current) {
@@ -64,12 +56,8 @@ export default function DiceContainer() {
       
       // 等待一小段时间确保所有骰子都完全锁定
       setTimeout(() => {
-        // 计算总点数 - 使用存储的值而不是读取物理引擎
-        setDiceValues(prev => {
-          const sum = prev.reduce((acc, val) => acc + val, 0);
-          setTotalPoints(sum);
-          return prev;
-        });
+        // 触发点数计算
+        setUpdatePointsTrigger(prev => prev + 1);
       }, 100);
     }
   }, []);
@@ -86,19 +74,15 @@ export default function DiceContainer() {
       // 重置稳定骰子计数和点数计算标记
       stableDiceCountRef.current = 0;
       hasCalculatedPointsRef.current = false;
-      
-      // 重置骰子值和总点数
-      setDiceValues([]);
-      setTotalPoints(0);
 
       setIsRolling(true);
       setResetCount(prevCount => prevCount + 1);
       
-      // 延长等待时间确保整个过程完成
+      // 增加等待时间确保整个过程完成
       resetTimerRef.current = setTimeout(() => {
         setIsRolling(false);
         resetTimerRef.current = null;
-      }, 4000);
+      }, 4500);
     }
   }, [isRolling]);
 
@@ -144,30 +128,13 @@ export default function DiceContainer() {
         {isRolling ? '骰子投掷中...' : '重新投掷骰子'}
       </button>
 
-      {/* 点数统计组件 - 直接传递值而不是让组件读取物理引擎 */}
-      <div style={{
-        position: 'fixed',
-        top: '20px',
-        right: '20px',
-        backgroundColor: 'rgba(255, 255, 255, 0.8)',
-        padding: '15px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)',
-        zIndex: 1000,
-        fontFamily: 'Arial, sans-serif',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end'
-      }}>
-        <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '5px' }}>
-          总点数: {isRolling ? '...' : totalPoints}
-        </div>
-        {!isRolling && diceValues.length > 0 && (
-          <div style={{ fontSize: '14px', color: '#666' }}>
-            {diceValues.filter(v => v > 0).join(' + ')} = {totalPoints}
-          </div>
-        )}
-      </div>
+      {/* 点数统计组件 */}
+      <Points 
+        diceRefs={diceRefs} 
+        resetCount={resetCount} 
+        isRolling={isRolling} 
+        updateTrigger={updatePointsTrigger}
+      />
 
       <Canvas 
         shadows 

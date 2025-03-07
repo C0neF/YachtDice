@@ -10,52 +10,13 @@ import dice4 from '../assets/dice_4.png'
 import dice5 from '../assets/dice_5.png'
 import dice6 from '../assets/dice_6.png'
 
-// Helper function to determine dice value from orientation
-function getDiceValueFromRotation(rotation: {x: number, y: number, z: number, w: number}): number {
-  // Create quaternion from dice rotation
-  const quat = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-  
-  // Define the six face normal vectors in dice local space
-  const faces = [
-    { normal: new THREE.Vector3(0, 0, 1), value: 1 },  // Front (Z+) = 1
-    { normal: new THREE.Vector3(1, 0, 0), value: 2 },  // Right (X+) = 2
-    { normal: new THREE.Vector3(0, 1, 0), value: 3 },  // Top (Y+) = 3
-    { normal: new THREE.Vector3(0, 0, -1), value: 4 }, // Back (Z-) = 4
-    { normal: new THREE.Vector3(-1, 0, 0), value: 5 }, // Left (X-) = 5
-    { normal: new THREE.Vector3(0, -1, 0), value: 6 }  // Bottom (Y-) = 6
-  ];
-  
-  // World up vector (the direction we're viewing from)
-  const worldUp = new THREE.Vector3(0, 1, 0);
-  
-  // Find which face normal points most toward world up after rotation
-  let maxAlignment = -Infinity;
-  let upFaceValue = 1; // Default to 1 if something goes wrong
-  
-  faces.forEach(face => {
-    // Apply dice rotation to the face normal
-    const rotatedNormal = face.normal.clone().applyQuaternion(quat);
-    
-    // Compute alignment with world up (dot product)
-    const alignment = rotatedNormal.dot(worldUp);
-    
-    // If this face is more aligned with up than previous best, update
-    if (alignment > maxAlignment) {
-      maxAlignment = alignment;
-      upFaceValue = face.value;
-    }
-  });
-  
-  return upFaceValue;
-}
-
 // 骰子组件props的接口定义
 interface PhysicsDiceProps {
   position?: [number, number, number];
   resetCount?: number;
   index?: number;
   startDelay?: number;
-  onStable?: (index: number, value: number) => void;  // 修改回调函数接收骰子点数
+  onStable?: (index: number) => void;  // 添加稳定回调函数
 }
 
 // 物理骰子组件
@@ -69,8 +30,6 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
   const currentDampingRef = useRef(0.5);
   // 跟踪骰子是否已经锁定
   const isLockedRef = useRef(false);
-  // 保存骰子最终的点数值
-  const finalValueRef = useRef(1);
 
   // 向父组件公开rigidBody实例
   useImperativeHandle(ref, () => diceRef.current as RapierRigidBody);
@@ -98,10 +57,6 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
   // 锁定骰子物理状态的函数
   const lockDicePhysics = () => {
     if (diceRef.current && !isLockedRef.current) {
-      // 获取最终骰子值
-      const rotation = diceRef.current.rotation();
-      finalValueRef.current = getDiceValueFromRotation(rotation);
-
       // 完全锁定骰子的物理属性 - 使用setBodyType需要额外的wake参数
       diceRef.current.setBodyType(2, true); // 2 = 固定/锁定 (Fixed), true = wake
       
@@ -112,9 +67,9 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       // 标记为已锁定
       isLockedRef.current = true;
       
-      // 如果提供了稳定回调函数，调用它并传递骰子的最终值
+      // 如果提供了稳定回调函数，调用它
       if (onStable) {
-        onStable(index, finalValueRef.current);
+        onStable(index);
       }
     }
   };
@@ -216,8 +171,6 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       currentDampingRef.current = 0.5;
       // 重置锁定状态
       isLockedRef.current = false;
-      // 重置骰子值
-      finalValueRef.current = 1;
       
       // 所有骰子使用相同的延迟，实现同时落下
       timerRef.current = setTimeout(() => {
@@ -294,12 +247,12 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
             stabilityTimerRef.current = null;
           }, 1500);
           
-          // 如果3秒后仍未锁定，强制锁定
+          // 如果5秒后仍未锁定，强制锁定
           setTimeout(() => {
             if (!isLockedRef.current && diceRef.current) {
               lockDicePhysics();
             }
-          }, 3000);
+          }, 4000);
         }
         timerRef.current = null;
       }, startDelay); // 所有骰子使用相同的延迟
@@ -322,6 +275,8 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
     };
   }, [resetCount, index, startDelay, position, onStable]);
 
+  // ...剩余代码保持不变...
+  
   // 骰子尺寸
   const diceSize = 0.6;
   const surfaceOffset = 0.003;
