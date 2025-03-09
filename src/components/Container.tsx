@@ -54,16 +54,18 @@ export default function DiceContainer() {
       // 所有骰子都已稳定，可以计算点数
       hasCalculatedPointsRef.current = true;
       
-      // 等待一小段时间确保所有骰子都完全锁定
+      // 延长等待时间，确保所有骰子都完全锁定并且在生产环境中不会产生抖动
       setTimeout(() => {
         // 触发点数计算
         setUpdatePointsTrigger(prev => prev + 1);
-      }, 100);
+      }, 200);
     }
   }, []);
 
   // 重置函数 - 使用useCallback以确保函数引用稳定
   const handleReset = useCallback(() => {
+    console.log("Reset button clicked, isRolling:", isRolling);
+    
     if (!isRolling) {
       // 如果已有计时器，先清除
       if (resetTimerRef.current) {
@@ -75,11 +77,31 @@ export default function DiceContainer() {
       stableDiceCountRef.current = 0;
       hasCalculatedPointsRef.current = false;
 
+      // 确保所有的骰子都正确重置
+      diceRefs.current.forEach((dice, idx) => {
+        if (dice) {
+          console.log(`Preparing dice ${idx} for reset`);
+          try {
+            // 重新激活物理
+            dice.setBodyType(0, true); // 0 = 动态 (Dynamic), true = wake
+            // 确保骰子有正确的物理状态
+            dice.setGravityScale(1.0, true);
+            // 重新唤醒骰子
+            dice.wakeUp();
+          } catch (error) {
+            console.error(`Error resetting dice ${idx}:`, error);
+          }
+        }
+      });
+
+      console.log("Updating isRolling and resetCount");
       setIsRolling(true);
-      setResetCount(prevCount => prevCount + 1);
+      // 确保resetCount变化，即使是同一值也要强制刷新
+      setResetCount(Date.now());
       
       // 增加等待时间确保整个过程完成
       resetTimerRef.current = setTimeout(() => {
+        console.log("Reset complete, setting isRolling to false");
         setIsRolling(false);
         resetTimerRef.current = null;
       }, 4500);

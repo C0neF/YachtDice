@@ -55,6 +55,7 @@ export default function Points({ diceRefs, resetCount, isRolling, updateTrigger 
   
   // 当骰子被重置时重置点数
   useEffect(() => {
+    console.log(`Points: resetCount changed to ${resetCount}`);
     if (resetCount > 0) {
       setTotalPoints(0);
       setDiceValues([]);
@@ -63,25 +64,38 @@ export default function Points({ diceRefs, resetCount, isRolling, updateTrigger 
   
   // 当所有骰子都稳定后（通过updateTrigger触发），计算点数
   useEffect(() => {
+    console.log(`Points: updateTrigger = ${updateTrigger}, isRolling = ${isRolling}`);
     if (updateTrigger > 0 && !isRolling) {
-      // 计算点数
-      const values: number[] = [];
-      let sum = 0;
-      
-      // 检查每个骰子的方向
-      diceRefs.current.forEach(dice => {
-        if (dice) {
-          const rotation = dice.rotation();
-          const value = getDiceValueFromRotation(rotation);
-          values.push(value);
-          sum += value;
-        }
-      });
-      
-      // 这里直接使用setState，因为已经确保骰子完全锁定，
-      // 不会引起任何物理计算干扰
-      setDiceValues(values);
-      setTotalPoints(sum);
+      console.log("Points: Calculating dice values");
+      // 添加延迟确保骰子物理状态完全稳定
+      // 这将解决生产环境中计算点数时可能引起的骰子抖动
+      setTimeout(() => {
+        // 计算点数
+        const values: number[] = [];
+        let sum = 0;
+        
+        // 检查每个骰子的方向
+        diceRefs.current.forEach((dice, idx) => {
+          if (dice) {
+            try {
+              const rotation = dice.rotation();
+              const value = getDiceValueFromRotation(rotation);
+              console.log(`Dice ${idx} value: ${value}`);
+              values.push(value);
+              sum += value;
+            } catch (error) {
+              console.error(`Error getting value for dice ${idx}:`, error);
+            }
+          }
+        });
+        
+        console.log(`Total points: ${sum}, values: ${values.join(', ')}`);
+        
+        // 这里直接使用setState，因为已经确保骰子完全锁定，
+        // 不会引起任何物理计算干扰
+        setDiceValues(values);
+        setTotalPoints(sum);
+      }, 100);
     }
   }, [updateTrigger, diceRefs, isRolling]);
 

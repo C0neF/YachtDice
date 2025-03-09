@@ -57,26 +57,42 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
   // 锁定骰子物理状态的函数
   const lockDicePhysics = () => {
     if (diceRef.current && !isLockedRef.current) {
-      // 完全锁定骰子的物理属性 - 使用setBodyType需要额外的wake参数
-      diceRef.current.setBodyType(2, true); // 2 = 固定/锁定 (Fixed), true = wake
+      // 不再使用setBodyType，因为这可能会导致重置问题
+      // 而是将重力比例设为0并清除所有速度
       
       // 清除所有速度和力
       diceRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
       diceRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
       
+      // 完全禁用重力和其他力的影响
+      diceRef.current.setGravityScale(0, true);
+      
+      // 设置超高阻尼以固定位置
+      diceRef.current.setLinearDamping(100);
+      diceRef.current.setAngularDamping(100);
+      
       // 标记为已锁定
       isLockedRef.current = true;
       
-      // 如果提供了稳定回调函数，调用它
-      if (onStable) {
-        onStable(index);
-      }
+      // 增加延迟确保物理状态完全稳定后再触发回调
+      // 这能解决生产环境中的抖动问题
+      setTimeout(() => {
+        // 如果提供了稳定回调函数，调用它
+        if (onStable) {
+          onStable(index);
+        }
+      }, 50);
     }
   };
 
   // 检查骰子是否稳定
   const checkStability = () => {
     if (!diceRef.current || isLockedRef.current) return;
+    
+    // 确保重力比例为1.0，以防在检查稳定性过程中被异常修改
+    if (diceRef.current.gravityScale() !== 1.0 && !isLockedRef.current) {
+      diceRef.current.setGravityScale(1.0, true);
+    }
     
     const currentPos = diceRef.current.translation();
     const currentTime = Date.now();
@@ -139,8 +155,12 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
 
   // 当resetCount变化时重置骰子 - 所有骰子同时落下
   useEffect(() => {
+    console.log(`Dice ${index}: resetCount = ${resetCount}, last = ${lastResetCountRef.current}`);
+    
     // 检查resetCount是否真的有变化，且大于上次处理的值
     if (resetCount > 0 && resetCount !== lastResetCountRef.current) {
+      console.log(`Dice ${index}: Resetting...`);
+      
       // 更新上次处理的重置计数
       lastResetCountRef.current = resetCount;
       
@@ -175,46 +195,58 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       // 所有骰子使用相同的延迟，实现同时落下
       timerRef.current = setTimeout(() => {
         if (diceRef.current) {
-          // 重新激活物理 - 使用setBodyType需要额外的wake参数
-          diceRef.current.setBodyType(0, true); // 0 = 动态 (Dynamic), true = wake
-          
-          // 获取从props传入的位置 - 骰子将排成一行
-          const [posX, initialY, posZ] = position;
-          
-          // 设置初始位置 - 使用传入的位置，但添加一点点随机性防止完全重叠
-          diceRef.current.setTranslation({ 
-            x: posX + (Math.random() - 0.5) * 0.05, 
-            y: initialY,
-            z: posZ + (Math.random() - 0.5) * 0.05
-          }, true);
+          try {
+            console.log(`Dice ${index}: Executing reset`);
+            
+            // 强制设置为动态类型 - 重要：确保物理引擎重新激活
+            diceRef.current.setBodyType(0, true); // 0 = 动态 (Dynamic), true = wake
+            
+            // 确保重置重力比例为正常值 - 修复慢动作问题
+            diceRef.current.setGravityScale(1.0, true);
+            
+            // 获取从props传入的位置 - 骰子将排成一行
+            const [posX, initialY, posZ] = position;
+            
+            // 设置初始位置 - 使用传入的位置，但添加一点点随机性防止完全重叠
+            diceRef.current.setTranslation({ 
+              x: posX + (Math.random() - 0.5) * 0.05, 
+              y: initialY,
+              z: posZ + (Math.random() - 0.5) * 0.05
+            }, true);
 
-          // 随机旋转 - 每个骰子有不同的初始旋转
-          const eulerRot = new THREE.Euler(
-            Math.random() * Math.PI, 
-            Math.random() * Math.PI, 
-            Math.random() * Math.PI
-          );
-          const quaternion = new THREE.Quaternion().setFromEuler(eulerRot);
-          diceRef.current.setRotation(
-            { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w },
-            true
-          );
+            // 随机旋转 - 每个骰子有不同的初始旋转
+            const eulerRot = new THREE.Euler(
+              Math.random() * Math.PI, 
+              Math.random() * Math.PI, 
+              Math.random() * Math.PI
+            );
+            const quaternion = new THREE.Quaternion().setFromEuler(eulerRot);
+            diceRef.current.setRotation(
+              { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w },
+              true
+            );
 
-          // 清除现有速度
-          diceRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
-          diceRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
+            // 重置物理参数
+            diceRef.current.setLinvel({ x: 0, y: 0, z: 0 }, true);
+            diceRef.current.setAngvel({ x: 0, y: 0, z: 0 }, true);
 
-          // 设置初始阻尼值
-          diceRef.current.setLinearDamping(currentDampingRef.current);
-          diceRef.current.setAngularDamping(currentDampingRef.current);
+            // 设置初始阻尼值
+            diceRef.current.setLinearDamping(currentDampingRef.current);
+            diceRef.current.setAngularDamping(currentDampingRef.current);
 
-          // 应用轻微的初始力和扭矩 - 给每个骰子一点随机性
-          const torque = {
-            x: (Math.random() - 0.5) * 0.1,
-            y: (Math.random() - 0.5) * 0.1,
-            z: (Math.random() - 0.5) * 0.1
-          };
-          diceRef.current.applyTorqueImpulse(torque, true);
+            // 应用轻微的初始力和扭矩 - 给每个骰子一点随机性
+            const torque = {
+              x: (Math.random() - 0.5) * 0.1,
+              y: (Math.random() - 0.5) * 0.1,
+              z: (Math.random() - 0.5) * 0.1
+            };
+            diceRef.current.applyTorqueImpulse(torque, true);
+            
+            // 强制唤醒确保物理引擎处理这个物体
+            diceRef.current.wakeUp();
+          } catch (error) {
+            console.error(`Dice ${index}: Error resetting:`, error);
+          }
           
           // 1.5秒后开始渐进增加阻尼，更自然地稳定骰子
           stabilityTimerRef.current = setTimeout(() => {
@@ -310,7 +342,8 @@ const PhysicsDice = forwardRef<RapierRigidBody, PhysicsDiceProps>((props, ref) =
       rotation={randomRotation as [number, number, number]} 
       colliders="cuboid"
       mass={0.1}
-      type={isLockedRef.current ? "fixed" : "dynamic"}  // 基于锁定状态动态设置类型
+      gravityScale={isLockedRef.current ? 0 : 1}  // 根据锁定状态动态设置重力比例
+      type="dynamic"  // 始终保持为动态类型，由代码控制锁定状态
     >
       {/* 主骰子 */}
       <mesh castShadow receiveShadow>
